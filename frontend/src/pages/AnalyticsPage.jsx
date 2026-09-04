@@ -1,28 +1,109 @@
-import React, { useState } from 'react';
-import { CORRIDORS, SYSTEM_INSIGHTS } from '../data/mockData';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { LeadTimeCurveChart } from '../components/charts/LeadTimeCurveChart';
 import { QualityBadge } from '../components/common/QualityBadge';
 import { KpiCard } from '../components/common/KpiCard';
-import { Activity, AlertTriangle, TrendingUp, BarChart2, ShieldAlert } from 'lucide-react';
+import { LoadingSpinner } from '../components/common/LoadingSpinner';
+import { ApiErrorState } from '../components/common/ApiErrorState';
+import {
+  fetchDashboardHorizons,
+  fetchDashboardRoutes,
+  fetchDashboardAlerts,
+} from '../services/api';
+import { RefreshCw } from 'lucide-react';
 
 export function AnalyticsPage() {
   const [selectedSector, setSelectedSector] = useState('DEL-BOM');
+  const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState(null);
 
-  const activeCorridor = CORRIDORS.find(c => c.id === selectedSector) || CORRIDORS[0];
+  const [horizons, setHorizons] = useState([]);
+  const [routes, setRoutes] = useState([]);
+  const [alerts, setAlerts] = useState([]);
 
-  const leadTimePoints = [
-    { horizon: 'T+1', fare: activeCorridor.t1Fare, label: '24h Spot' },
-    { horizon: 'T+7', fare: activeCorridor.t7Fare, label: '7 Days' },
-    { horizon: 'T+15', fare: activeCorridor.t15Fare, label: '15 Days' },
-    { horizon: 'T+30', fare: activeCorridor.t30Fare, label: '30 Days' },
-    { horizon: 'T+45', fare: activeCorridor.t45Fare, label: '45 Days' },
-  ];
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setApiError(null);
 
-  const volatilityRanking = [...CORRIDORS].sort((a, b) => {
-    const vA = parseFloat(a.volatility.match(/\((.*?)%\)/)?.[1] || 0);
-    const vB = parseFloat(b.volatility.match(/\((.*?)%\)/)?.[1] || 0);
-    return vB - vA;
-  }).slice(0, 8);
+    const [hzRes, routesRes, alertsRes] = await Promise.all([
+      fetchDashboardHorizons(),
+      fetchDashboardRoutes(),
+      fetchDashboardAlerts(),
+    ]);
+
+    if (!hzRes.ok) {
+      setApiError(`Horizons API: ${hzRes.error}`);
+      setLoading(false);
+      return;
+    }
+    if (!routesRes.ok) {
+      setApiError(`Routes API: ${routesRes.error}`);
+      setLoading(false);
+      return;
+    }
+    if (!alertsRes.ok) {
+      setApiError(`Alerts API: ${alertsRes.error}`);
+      setLoading(false);
+      return;
+    }
+
+    setHorizons(hzRes.data.horizons || []);
+    setRoutes(routesRes.data.routes || []);
+    setAlerts(alertsRes.data.alerts || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const activeCorridor = useMemo(() => {
+    return routes.find(c => c.route_id === selectedSector) || routes[0] || null;
+  }, [routes, selectedSector]);
+
+  const leadTimePoints = useMemo(() => {
+    if (!activeCorridor) return [];
+    return [
+      { horizon: 'T+1', fare: activeCorridor.t1_fare, label: '24h Spot' },
+      { horizon: 'T+7', fare: activeCorridor.t7_fare, label: '7 Days' },
+      { horizon: 'T+15', fare: activeCorridor.t15_fare, label: '15 Days' },
+      { horizon: 'T+30', fare: activeCorridor.t30_fare, label: '30 Days' },
+      { horizon: 'T+45', fare: activeCorridor.t45_fare, label: '45 Days' },
+    ];
+  }, [activeCorridor]);
+
+  const volatilityRanking = useMemo(() => {
+    return [...routes].sort((a, b) => {
+      const vA = parseFloat(a.volatility.match(/\((.*?)%\)/)?.[1] || '0');
+      const vB = parseFloat(b.volatility.match(/\((.*?)%\)/)?.[1] || '0');
+      return vB - vA;
+    }).slice(0, 8);
+  }, [routes]);
+
+  if (loading && routes.length === 0) {
+    return <LoadingSpinner message="Retrieving advance-purchase lead-time curves and analytics from API..." />;
+  }
+
+  if (apiError && routes.length === 0) {
+    return (
+      <div>
+        <div className="gov-page-header">
+          <div className="gov-title-block">
+            <h1>ADVANCED AIRFARE ANALYTICS</h1>
+            <p>Lead-time horizon curves, volatility ranking, and demonstration surveillance alerts.</p>
+          </div>
+        </div>
+        <ApiErrorState
+          title="Analytics API Unavailable"
+          message={`Communication failure while querying analytics feeds: ${apiError}.`}
+          onRetry={loadData}
+        />
+      </div>
+    );
+  }
+
+  const surgePremiumPct = activeCorridor && activeCorridor.t45_fare > 0
+    ? Math.round(((activeCorridor.t1_fare - activeCorridor.t45_fare) / activeCorridor.t45_fare) * 100)
+    : 166;
 
   return (
     <div>
@@ -30,52 +111,60 @@ export function AnalyticsPage() {
       <div className="gov-page-header">
         <div className="gov-title-block">
           <h1>ADVANCED AIRFARE ANALYTICS</h1>
-          <p>Lead-time horizon curves, volatility ranking, and demonstration surveillance alerts (UI Demonstration).</p>
+          <p>Lead-time horizon curves, volatility ranking, and demonstration surveillance alerts (API Demonstration).</p>
         </div>
         <div className="gov-action-controls">
-          <span className="gov-badge info">UI DEMONSTRATION</span>
+          <span className="gov-badge info">API DEMONSTRATION</span>
           <select
             className="gov-select"
             value={selectedSector}
             onChange={(e) => setSelectedSector(e.target.value)}
           >
-            {CORRIDORS.map(c => <option key={c.id} value={c.id}>{c.id} ({c.sector})</option>)}
+            {routes.map(c => (
+              <option key={c.route_id} value={c.route_id}>
+                {c.route_id} ({c.sector})
+              </option>
+            ))}
           </select>
+          <button className="gov-btn" onClick={loadData} title="Sync with API">
+            <RefreshCw size={13} />
+            <span>Sync</span>
+          </button>
         </div>
       </div>
 
-      {/* KPI Stats */}
+      {/* KPI Stats (Powered by API GET /api/v1/dashboard/horizons & /routes) */}
       <div className="gov-kpi-grid">
         <KpiCard
-          title="Active Dynamic Surge Premium"
-          value="+166%"
+          title="Dynamic Surge Premium"
+          value={`+${surgePremiumPct}%`}
           delta="T+1 vs T+45"
           deltaType="negative"
-          subtext={`Current sector: ${selectedSector} (Demo)`}
+          subtext={`Current sector: ${activeCorridor?.route_id || selectedSector} (Demo)`}
           badgeText="SPOT SURGE"
           badgeType="alert"
           highlight={true}
         />
         <KpiCard
-          title="System Volatility Median"
-          value="11.6%"
-          subtext="Median standard deviation across 50 corridors (Demo)"
-          badgeText="NETWORK SPREAD"
+          title="Required Horizons"
+          value={`${horizons.length} SLICES`}
+          subtext="T+1, T+7, T+15, T+30, T+45"
+          badgeText="PROJECT SPECS"
           badgeType="info"
         />
         <KpiCard
-          title="Price Wave Amplitude"
-          value="₹4,600"
-          subtext="Average intra-week cyclical swing (Demo)"
-          badgeText="CYCLICAL"
+          title="Sector Base Fare"
+          value={`₹${activeCorridor?.base_fare?.toLocaleString() || '4,680'}`}
+          subtext="Unbundled airline base fare floor"
+          badgeText="UNBUNDLED"
           badgeType="info"
         />
         <KpiCard
-          title="Demonstration Anomaly Flags"
-          value="2"
+          title="Demonstration Anomaly Alerts"
+          value={alerts.length.toString()}
           delta="DEMO ALERTS"
           deltaType="negative"
-          subtext="DEL-PAT & DEL-GAU active demo alerts"
+          subtext="Active demonstration surveillance triggers"
           badgeText="DEMO ALERTS"
           badgeType="warn"
         />
@@ -87,7 +176,7 @@ export function AnalyticsPage() {
           <div className="gov-card-header">
             <div className="gov-card-title">
               1. LEAD-TIME DECAY CURVE: {selectedSector}
-              <span className="gov-card-subtitle">Price decay across T+1 to T+45 (Simulated Sector Data)</span>
+              <span className="gov-card-subtitle">Price decay across required horizons (API Sector Values)</span>
             </div>
             <span className="gov-badge info">DEMO DATA</span>
           </div>
@@ -128,12 +217,12 @@ export function AnalyticsPage() {
         </div>
       </div>
 
-      {/* Section 3 & 4: Route Volatility Ranking & Statistical Anomaly Alerts */}
+      {/* Section 3 & 4: Route Volatility Ranking & Demonstration Anomaly Alerts */}
       <div className="gov-two-column">
         <div className="gov-card">
           <div className="gov-card-header">
             <div className="gov-card-title">
-              3. ROUTE VOLATILITY RANKING (DEMO METRICS)
+              3. ROUTE VOLATILITY RANKING (API BASKET)
               <span className="gov-card-subtitle">Corridors ranked by coefficient of price variation</span>
             </div>
             <span className="gov-badge info">DEMO DATA</span>
@@ -151,9 +240,9 @@ export function AnalyticsPage() {
               </thead>
               <tbody>
                 {volatilityRanking.map((c, i) => (
-                  <tr key={c.id}>
+                  <tr key={c.route_id}>
                     <td className="font-mono" style={{ fontWeight: 700, color: 'var(--text-subtle)' }}>{i + 1}</td>
-                    <td className="font-mono" style={{ fontWeight: 700, color: 'var(--navy-dark)' }}>{c.id}</td>
+                    <td className="font-mono" style={{ fontWeight: 700, color: 'var(--navy-dark)' }}>{c.route_id}</td>
                     <td style={{ color: 'var(--text-muted)' }}>{c.sector}</td>
                     <td className="font-mono" style={{ textAlign: 'right', color: '#dc2626', fontWeight: 600 }}>{c.volatility}</td>
                     <td><QualityBadge flag={c.quality} /></td>
@@ -167,42 +256,32 @@ export function AnalyticsPage() {
         <div className="gov-card">
           <div className="gov-card-header">
             <div className="gov-card-title">
-              4. DEMONSTRATION ANOMALY & SPIKE ALERTS
-              <span className="gov-card-subtitle">UI demonstration of future anomaly alerts</span>
+              4. DEMONSTRATION SURVEILLANCE ALERTS
+              <span className="gov-card-subtitle">Retrieved from /api/v1/dashboard/alerts</span>
             </div>
             <span className="gov-badge alert">DEMO ALERTS</span>
           </div>
           <div className="gov-card-body" style={{ padding: '8px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ padding: '8px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '2px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#991b1b', fontSize: '11.5px' }}>
-                  <span>ANOMALY DETECTED: DEL → PAT</span>
-                  <span className="font-mono">T+1 SPOT</span>
+              {alerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  style={{
+                    padding: '8px',
+                    background: alert.level === 'warning' ? '#fef2f2' : alert.level === 'anomaly' ? '#fffbeb' : '#f0fdf4',
+                    border: `1px solid ${alert.level === 'warning' ? '#fecaca' : alert.level === 'anomaly' ? '#fde68a' : '#bbf7d0'}`,
+                    borderRadius: '2px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: alert.level === 'warning' ? '#991b1b' : alert.level === 'anomaly' ? '#92400e' : '#166534', fontSize: '11.5px' }}>
+                    <span>{alert.title}</span>
+                    <span className="font-mono">{alert.horizon || alert.category}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>
+                    {alert.detail}
+                  </div>
                 </div>
-                <div style={{ fontSize: '11px', color: '#7f1d1d', marginTop: '2px' }}>
-                  Spot fares trading at ₹11,800 (+5.8% daily jump). 94% scheduled capacity sold out. Demonstration surveillance trigger active.
-                </div>
-              </div>
-
-              <div style={{ padding: '8px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '2px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#92400e', fontSize: '11.5px' }}>
-                  <span>ELEVATED VOLATILITY: DEL → GAU</span>
-                  <span className="font-mono">T+7 HORIZON</span>
-                </div>
-                <div style={{ fontSize: '11px', color: '#78350f', marginTop: '2px' }}>
-                  T+7 fares at ₹7,800 vs historical baseline ₹5,900. Price dispersion across operating carriers exceeds ₹2,400.
-                </div>
-              </div>
-
-              <div style={{ padding: '8px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '2px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#166534', fontSize: '11.5px' }}>
-                  <span>STABILITY COMPLIANT: BOM → BLR</span>
-                  <span className="font-mono">NETWORK NORMAL</span>
-                </div>
-                <div style={{ fontSize: '11px', color: '#14532d', marginTop: '2px' }}>
-                  Price relatives within ±0.4% band. Cross-carrier price alignment stable at ₹4,420 average.
-                </div>
-              </div>
+              ))}
             </div>
           </div>
         </div>

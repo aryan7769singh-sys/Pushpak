@@ -1,11 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CORRIDORS, AIRPORTS } from '../data/mockData';
 import { QualityBadge } from '../components/common/QualityBadge';
-import { Search, Filter, ArrowRight, Download } from 'lucide-react';
+import { LoadingSpinner } from '../components/common/LoadingSpinner';
+import { ApiErrorState } from '../components/common/ApiErrorState';
+import { fetchDashboardRoutes } from '../services/api';
+import { Search, ArrowRight, Download, RefreshCw } from 'lucide-react';
 
 export function RoutesPage() {
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState(null);
+  const [routes, setRoutes] = useState([]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [originFilter, setOriginFilter] = useState('ALL');
   const [destFilter, setDestFilter] = useState('ALL');
@@ -13,14 +19,56 @@ export function RoutesPage() {
   const [sortField, setSortField] = useState('changePct');
   const [sortAsc, setSortAsc] = useState(false);
 
-  const origins = useMemo(() => ['ALL', ...new Set(CORRIDORS.map(c => c.origin))], []);
-  const destinations = useMemo(() => ['ALL', ...new Set(CORRIDORS.map(c => c.dest))], []);
+  const loadRoutes = useCallback(async () => {
+    setLoading(true);
+    setApiError(null);
+
+    const res = await fetchDashboardRoutes();
+    if (!res.ok) {
+      setApiError(res.error || 'Failed to fetch corridors from API');
+      setLoading(false);
+      return;
+    }
+
+    const normalized = (res.data?.routes || []).map(r => ({
+      id: r.route_id,
+      origin: r.origin,
+      dest: r.destination,
+      routeLabel: r.route_label || `${r.origin} → ${r.destination}`,
+      sector: r.sector,
+      distanceKm: r.distance_km,
+      dailyFlights: r.daily_flights,
+      avgFare: r.avg_fare,
+      t1Fare: r.t1_fare,
+      t7Fare: r.t7_fare,
+      t15Fare: r.t15_fare,
+      t30Fare: r.t30_fare,
+      t45Fare: r.t45_fare,
+      changePct: r.change_pct,
+      volatility: r.volatility,
+      quality: r.quality,
+      status: r.status,
+      weightStatus: r.weight_status || 'DEMO',
+    }));
+
+    setRoutes(normalized);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadRoutes();
+  }, [loadRoutes]);
+
+  const origins = useMemo(() => ['ALL', ...new Set(routes.map(c => c.origin))], [routes]);
+  const destinations = useMemo(() => ['ALL', ...new Set(routes.map(c => c.dest))], [routes]);
 
   const filteredRoutes = useMemo(() => {
-    return CORRIDORS.filter(c => {
+    return routes.filter(c => {
       const matchSearch =
         c.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.sector.toLowerCase().includes(searchTerm.toLowerCase());
+        c.sector.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.dest.toLowerCase().includes(searchTerm.toLowerCase());
       const matchOrigin = originFilter === 'ALL' || c.origin === originFilter;
       const matchDest = destFilter === 'ALL' || c.dest === destFilter;
       const matchQuality = qualityFilter === 'ALL' || c.quality === qualityFilter;
@@ -33,7 +81,29 @@ export function RoutesPage() {
       if (aVal > bVal) return sortAsc ? 1 : -1;
       return 0;
     });
-  }, [searchTerm, originFilter, destFilter, qualityFilter, sortField, sortAsc]);
+  }, [routes, searchTerm, originFilter, destFilter, qualityFilter, sortField, sortAsc]);
+
+  if (loading && routes.length === 0) {
+    return <LoadingSpinner message="Retrieving 50 strategic domestic corridors from /api/v1/dashboard/routes..." />;
+  }
+
+  if (apiError && routes.length === 0) {
+    return (
+      <div>
+        <div className="gov-page-header">
+          <div className="gov-title-block">
+            <h1>ROUTE SURVEILLANCE</h1>
+            <p>Continuous price monitoring across 50 strategic domestic flight sectors.</p>
+          </div>
+        </div>
+        <ApiErrorState
+          title="Route Basket Offline"
+          message={`Unable to load the 50 strategic domestic corridor basket from API: ${apiError}.`}
+          onRetry={loadRoutes}
+        />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -41,10 +111,14 @@ export function RoutesPage() {
       <div className="gov-page-header">
         <div className="gov-title-block">
           <h1>ROUTE SURVEILLANCE</h1>
-          <p>Continuous price monitoring and quality audit across 50 strategic domestic flight sectors.</p>
+          <p>Continuous price monitoring and quality audit across 50 strategic domestic flight sectors (API Basket).</p>
         </div>
         <div className="gov-action-controls">
-          <span className="gov-badge info">{filteredRoutes.length} CORRIDORS ACTIVE</span>
+          <span className="gov-badge info">{routes.length} CORRIDORS (DEMO BASKET)</span>
+          <button className="gov-btn" onClick={loadRoutes} title="Sync with API">
+            <RefreshCw size={13} />
+            <span>Sync</span>
+          </button>
           <button className="gov-btn" onClick={() => alert("Route surveillance dataset exported.")}>
             <Download size={13} />
             <span>Export Registry (CSV)</span>
@@ -58,7 +132,7 @@ export function RoutesPage() {
           <Search size={13} color="#64748b" />
           <input
             type="text"
-            placeholder="Filter by corridor (e.g. DEL-BOM)..."
+            placeholder="Filter corridor (e.g. DEL-BOM)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -102,7 +176,7 @@ export function RoutesPage() {
         </div>
       </div>
 
-      {/* Main Route Table */}
+      {/* Main Route Table (Powered by API GET /api/v1/dashboard/routes) */}
       <div className="gov-table-wrapper">
         <table className="gov-table">
           <thead>
@@ -120,6 +194,7 @@ export function RoutesPage() {
               <th style={{ textAlign: 'right' }}>T+45</th>
               <th>VOLATILITY</th>
               <th>QUALITY</th>
+              <th>WEIGHT</th>
               <th style={{ textAlign: 'center' }}>ACTION</th>
             </tr>
           </thead>
@@ -151,6 +226,7 @@ export function RoutesPage() {
                 <td style={{ textAlign: 'right', color: '#16a34a' }} className="font-mono">₹{route.t45Fare}</td>
                 <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{route.volatility}</td>
                 <td><QualityBadge flag={route.quality} /></td>
+                <td><span className="gov-badge info">{route.weightStatus}</span></td>
                 <td style={{ textAlign: 'center' }}>
                   <button
                     className="gov-btn"
@@ -167,7 +243,7 @@ export function RoutesPage() {
             ))}
             {filteredRoutes.length === 0 && (
               <tr>
-                <td colSpan="12" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-subtle)' }}>
+                <td colSpan="13" style={{ textAlign: 'center', padding: '24px', color: 'var(--text-subtle)' }}>
                   No corridors matched the filter parameters.
                 </td>
               </tr>

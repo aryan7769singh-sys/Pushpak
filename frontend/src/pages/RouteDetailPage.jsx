@@ -1,18 +1,55 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { CORRIDORS, AIRLINES, RECENT_OBSERVATIONS } from '../data/mockData';
 import { KpiCard } from '../components/common/KpiCard';
 import { QualityBadge } from '../components/common/QualityBadge';
 import { LeadTimeCurveChart } from '../components/charts/LeadTimeCurveChart';
 import { CarrierComparisonChart } from '../components/charts/CarrierComparisonChart';
+import { fetchDashboardRoutes } from '../services/api';
 import { ArrowLeft, Download, ShieldCheck, Database, Clock } from 'lucide-react';
 
 export function RouteDetailPage() {
   const { routeId } = useParams();
   const navigate = useNavigate();
+  const [apiCorridor, setApiCorridor] = useState(null);
 
-  // Find route or fallback to DEL-BOM
-  const corridor = CORRIDORS.find(c => c.id === routeId) || CORRIDORS[0];
+  useEffect(() => {
+    async function loadCorridor() {
+      const res = await fetchDashboardRoutes();
+      if (res.ok && res.data?.routes) {
+        const found = res.data.routes.find(r => r.route_id === routeId);
+        if (found) {
+          setApiCorridor({
+            id: found.route_id,
+            origin: found.origin,
+            dest: found.destination,
+            sector: found.sector,
+            distanceKm: found.distance_km,
+            dailyFlights: found.daily_flights,
+            avgFare: found.avg_fare,
+            t1Fare: found.t1_fare,
+            t7Fare: found.t7_fare,
+            t15Fare: found.t15_fare,
+            t30Fare: found.t30_fare,
+            t45Fare: found.t45_fare,
+            changePct: found.change_pct,
+            volatility: found.volatility,
+            quality: found.quality,
+            status: found.status,
+            baseFare: found.base_fare,
+            taxes: found.taxes,
+            airportCharges: found.airport_charges,
+            auxFees: found.aux_fees,
+            weightStatus: found.weight_status || 'DEMO',
+          });
+        }
+      }
+    }
+    loadCorridor();
+  }, [routeId]);
+
+  // Find route from API or fallback to mock
+  const corridor = apiCorridor || CORRIDORS.find(c => c.id === routeId) || CORRIDORS[0];
 
   const leadTimePoints = [
     { horizon: 'T+1', fare: corridor.t1Fare, label: '24h Spot' },

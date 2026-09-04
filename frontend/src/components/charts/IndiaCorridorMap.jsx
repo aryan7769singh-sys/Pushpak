@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AIRPORTS, CORRIDORS } from '../../data/mockData';
 
-export function IndiaCorridorMap({ onSelectCorridor }) {
+export function IndiaCorridorMap({ onSelectCorridor, corridors = CORRIDORS }) {
   const [activeAirport, setActiveAirport] = useState(null);
   const [activeCorridor, setActiveCorridor] = useState(null);
 
@@ -59,16 +59,19 @@ export function IndiaCorridorMap({ onSelectCorridor }) {
         />
 
         {/* Corridor Route Vectors */}
-        {CORRIDORS.map((corridor) => {
+        {corridors.map((corridor) => {
           const origin = getAirportCoords(corridor.origin);
-          const dest = getAirportCoords(corridor.dest);
+          const destCode = corridor.dest || corridor.destination;
+          const dest = getAirportCoords(destCode);
+          const corridorId = corridor.id || corridor.route_id;
+          const changePct = corridor.changePct ?? corridor.change_pct ?? 0;
 
           // Control point for subtle curve
           const midX = (origin.x + dest.x) / 2;
           const midY = (origin.y + dest.y) / 2 - 15;
 
-          const isHovered = activeCorridor?.id === corridor.id;
-          const strokeColor = corridor.changePct > 4 ? '#dc2626' : corridor.changePct < 0 ? '#16a34a' : '#2563eb';
+          const isHovered = (activeCorridor?.id || activeCorridor?.route_id) === corridorId;
+          const strokeColor = changePct > 4 ? '#dc2626' : changePct < 0 ? '#16a34a' : '#2563eb';
 
           return (
             <path
@@ -139,12 +142,14 @@ export function IndiaCorridorMap({ onSelectCorridor }) {
           }}
         >
           <div style={{ fontWeight: 700, color: 'var(--navy-dark)' }}>
-            {activeCorridor.origin} → {activeCorridor.dest} ({activeCorridor.sector})
+            {activeCorridor.origin} → {activeCorridor.dest || activeCorridor.destination} ({activeCorridor.sector})
           </div>
           <div style={{ display: 'flex', gap: '10px', marginTop: '2px', color: 'var(--text-subtle)' }}>
-            <span>Avg: <strong style={{ color: '#0f172a' }}>₹{activeCorridor.avgFare.toLocaleString()}</strong></span>
-            <span>T+1: <strong style={{ color: '#dc2626' }}>₹{activeCorridor.t1Fare.toLocaleString()}</strong></span>
-            <span>Day: <strong style={{ color: activeCorridor.changePct > 0 ? '#dc2626' : '#16a34a' }}>{activeCorridor.changePct > 0 ? '+' : ''}{activeCorridor.changePct}%</strong></span>
+            <span>Avg: <strong style={{ color: '#0f172a' }}>₹{(activeCorridor.avgFare ?? activeCorridor.avg_fare ?? 0).toLocaleString()}</strong></span>
+            <span>T+1: <strong style={{ color: '#dc2626' }}>₹{(activeCorridor.t1Fare ?? activeCorridor.t1_fare ?? 0).toLocaleString()}</strong></span>
+            <span>Day: <strong style={{ color: (activeCorridor.changePct ?? activeCorridor.change_pct ?? 0) > 0 ? '#dc2626' : '#16a34a' }}>
+              {(activeCorridor.changePct ?? activeCorridor.change_pct ?? 0) > 0 ? '+' : ''}{activeCorridor.changePct ?? activeCorridor.change_pct ?? 0}%
+            </strong></span>
           </div>
         </div>
       )}

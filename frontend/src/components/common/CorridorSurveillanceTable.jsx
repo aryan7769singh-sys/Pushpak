@@ -10,6 +10,7 @@ export function CorridorSurveillanceTable({
   subtitle = "Dynamic monitoring of strategic domestic corridors.",
   initialLimit = 8,
   showPagination = true,
+  corridors: propCorridors,
 }) {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
@@ -21,18 +22,47 @@ export function CorridorSurveillanceTable({
   const [selectedCorridor, setSelectedCorridor] = useState(null);
   const pageSize = initialLimit;
 
+  const corridors = useMemo(() => {
+    const raw = propCorridors || CORRIDORS;
+    return raw.map(c => ({
+      ...c,
+      id: c.id || c.route_id || 'UNKNOWN',
+      origin: c.origin || '',
+      dest: c.dest || c.destination || '',
+      sector: c.sector || 'Domestic Sector',
+      distanceKm: c.distanceKm ?? c.distance_km ?? 1000,
+      dailyFlights: c.dailyFlights ?? c.daily_flights ?? 20,
+      avgFare: c.avgFare ?? c.avg_fare ?? 0,
+      t1Fare: c.t1Fare ?? c.t1_fare ?? 0,
+      t7Fare: c.t7Fare ?? c.t7_fare ?? 0,
+      t15Fare: c.t15Fare ?? c.t15_fare ?? 0,
+      t30Fare: c.t30Fare ?? c.t30_fare ?? 0,
+      t45Fare: c.t45Fare ?? c.t45_fare ?? 0,
+      changePct: c.changePct ?? c.change_pct ?? 0,
+      baseFare: c.baseFare ?? c.base_fare ?? 0,
+      taxes: c.taxes ?? 0,
+      airportCharges: c.airportCharges ?? c.airport_charges ?? 0,
+      auxFees: c.auxFees ?? c.aux_fees ?? 0,
+      volatility: c.volatility || 'Standard',
+      quality: c.quality || 'STANDARD',
+      status: c.status || 'Surveillance Active',
+    }));
+  }, [propCorridors]);
+
   // Sectors for filter dropdown
   const sectors = useMemo(() => {
-    return ['ALL', ...new Set(CORRIDORS.map(c => c.sector))];
-  }, []);
+    return ['ALL', ...new Set(corridors.map(c => c.sector))];
+  }, [corridors]);
 
   // Filter & sort
   const filteredData = useMemo(() => {
-    return CORRIDORS.filter(c => {
+    return corridors.filter(c => {
+      const routeId = c.id || '';
+      const destCode = c.dest || '';
       const matchSearch =
-        c.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        routeId.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.origin.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.dest.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        destCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.sector.toLowerCase().includes(searchTerm.toLowerCase());
       const matchSector = sectorFilter === 'ALL' || c.sector === sectorFilter;
       const matchStatus = statusFilter === 'ALL' || c.quality === statusFilter;
